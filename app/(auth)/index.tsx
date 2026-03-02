@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { Button, Input } from '@rneui/themed'
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
  
 export default function Auth() {
   const [email, setEmail] = useState('')
@@ -22,7 +23,7 @@ export default function Auth() {
           Alert.alert(error.message)
           setLoading(false)
         } else {
-          router.replace("/(tabs)")
+          router.replace("../(tabs)/mainmenu")
         }
       }
       async function signUpWithEmail() {
@@ -38,12 +39,12 @@ export default function Auth() {
           Alert.alert(error.message)
           setLoading(false)
         } else {
-          router.replace("/(tabs)")
+          router.replace("/(tabs)/mainmenu")
         }
       }
 
   return (
-<View className="flex-1 bg-white">
+<SafeAreaView className="flex-1 bg-white">
 
   {/* Header, bild */}
   <Image
@@ -74,6 +75,7 @@ export default function Auth() {
         <TextInput
           placeholder="Ange ditt lösenord"
           className="flex-1 text-base"
+          secureTextEntry
           onChangeText={(text) => setPassword(text)}
           value={password}
         />
@@ -107,6 +109,6 @@ export default function Auth() {
       </View>
 
     </View>
-  </View>
+  </SafeAreaView>
   );
 }

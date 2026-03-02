@@ -25,7 +25,7 @@ export default function Register() {
             Alert.alert(error.message)
         } else {
             Alert.alert("Kontot har skapats!")
-            router.replace("/(tabs)")
+            router.replace("../(tabs)")
         }
         setLoading(false)
         }
