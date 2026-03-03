@@ -37,7 +37,7 @@ export default function TabsLayout() {
         },
       })}
     >
-      <Tabs.Screen name="profile" />
+      <Tabs.Screen name="side-menu" />
       <Tabs.Screen name="mainmenu" />
       <Tabs.Screen name="diagnostics" />
       

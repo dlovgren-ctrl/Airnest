@@ -49,7 +49,7 @@ export default function Auth() {
   {/* Header, bild */}
   <Image
     source={require("../../assets/images/rusta.png")}
-    className="w-full h-64"
+    className="w-full h-40"
     resizeMode="cover"
   />
 
