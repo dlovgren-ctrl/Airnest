@@ -48,12 +48,12 @@ export default function Auth() {
 
   {/* Header, bild */}
   <Image
-    source={require("../../assets/images/rusta.png")}
-    className="w-full h-40"
-    resizeMode="cover"
+    source={require("../../assets/images/logo.png")}
+    className="w-full h-40 mb-3 mt-12"
+    resizeMode="contain"
   />
 
-    <View className="flex-1 bg-gray-100 px-6 -mt-1 pt-8 rounded-t-3xl">
+    <View className="flex-1 bg-white px-6 -mt-1 pt-8 rounded-t-3xl">
 
       {/* E-post */}
       <Text className="text-gray-700 mb-2 text-base font-medium">

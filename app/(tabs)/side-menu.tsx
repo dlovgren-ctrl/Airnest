@@ -10,6 +10,10 @@ export default function SideMenu() {
     router.replace("/(auth)");
   }
 
+  function handleOpenSettings() {
+    router.push("/settings");
+  }
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       
@@ -20,8 +24,8 @@ export default function SideMenu() {
             <Ionicons name="person" size={30} color="black" />
           </View>
           <View>
-            <Text className="text-lg font-semibold">Ditt Namn</Text>
-            <Text className="text-gray-500">din@email.se</Text>
+            <Text className="text-lg font-semibold">Dennis</Text>
+            <Text className="text-gray-500">test@gmail.com</Text>
           </View>
         </View>
       </View>
@@ -34,13 +38,16 @@ export default function SideMenu() {
           <Text className="ml-4 text-base">Profil</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity className="flex-row items-center px-6 py-4 border-b border-gray-200">
+        <TouchableOpacity
+          className="flex-row items-center px-6 py-4 border-b border-gray-200"
+          onPress={handleOpenSettings}
+        >
           <Ionicons name="settings-outline" size={22} />
           <Text className="ml-4 text-base">Inställningar</Text>
         </TouchableOpacity>
 
         <TouchableOpacity className="flex-row items-center px-6 py-4">
-          <Ionicons name="settings-outline" size={22} />
+          <Ionicons name="help-circle-outline" size={22} />
           <Text className="ml-4 text-base">Hjälp</Text>
         </TouchableOpacity>
       </View>

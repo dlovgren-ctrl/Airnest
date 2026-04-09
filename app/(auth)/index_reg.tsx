@@ -33,9 +33,9 @@ export default function Register() {
 
     <View className="flex-1 bg-white">
 
-        <View className="flex-1 bg-gray-100 px-6 -mt-1 pt-8 rounded-t-3xl">
+        <View className="flex-1 white px-6 -mt-1 pt-8 rounded-t-3xl">
 
-        <Text className="text-gray-900 mb-4 text-base items-center font-medium text-3xl">
+        <Text className="text-gray-900 mb-4 mt-12 text-base items-center font-medium text-3xl">
             Registrera ett konto
         </Text>
 
