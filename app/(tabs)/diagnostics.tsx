@@ -107,17 +107,25 @@ export default function Diagnostics() {
     setSensorHttpFailure(null);
 
     let cancelled = false;
+    let inFlight = false;
+
     const tick = async () => {
-      const { data, failure } =
-        await fetchArduinoSensorsFromHttpDetailed(sensorIp);
-      if (cancelled) return;
-      if (data) {
-        setTemperature(data.temperature);
-        setHumidity(data.humidity);
-        setSensorHttpFailure(null);
-        return;
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const { data, failure } =
+          await fetchArduinoSensorsFromHttpDetailed(sensorIp);
+        if (cancelled) return;
+        if (data) {
+          setTemperature(data.temperature);
+          setHumidity(data.humidity);
+          setSensorHttpFailure(null);
+        } else {
+          setSensorHttpFailure(failure);
+        }
+      } finally {
+        inFlight = false;
       }
-      setSensorHttpFailure(failure);
     };
 
     void tick();
@@ -144,6 +152,12 @@ export default function Diagnostics() {
     arduinoPaired &&
     temperature === null &&
     humidity === null;
+
+  const showStaleReadingHint =
+    Boolean(sensorIp) &&
+    arduinoPaired &&
+    sensorHttpFailure != null &&
+    (temperature !== null || humidity !== null);
 
   return (
     <SafeAreaView className="flex-1 bg-white px-6 pt-6">
@@ -187,6 +201,17 @@ export default function Diagnostics() {
           under Inställningar (efter parkoppling om UUID 9999 fungerar, eller
           manuellt).
         </Text>
+      ) : null}
+
+      {showStaleReadingHint && sensorIp ? (
+        <View className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4">
+          <Text className="text-xs text-amber-900 font-medium">
+            Senaste hämtningen misslyckades — siffrorna kan vara gamla.
+          </Text>
+          <Text className="text-xs text-amber-800 mt-1">
+            {describeSensorHttpFailure(sensorIp, sensorHttpFailure)}
+          </Text>
+        </View>
       ) : null}
 
       {showHttpEndpointHint && sensorIp ? (

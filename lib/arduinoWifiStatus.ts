@@ -1,6 +1,18 @@
+import type { ProgramMode } from "./programState";
+
 const KEY_PAIRED = "arduinoWifiPaired";
 const KEY_SSID = "arduinoWifiSsid";
 const KEY_SENSOR_IP = "arduinoSensorIp";
+
+function normalizeStoredSsid(raw: string | null): string | null {
+  if (!raw) return null;
+  const normalized = raw
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 64);
+  return normalized || null;
+}
 
 /**
  * Giltig IPv4 för att nå Arduino på LAN. Slår t.ex. ut 0.0.0.0 som Arduino
@@ -34,7 +46,13 @@ export type ArduinoWifiPairedState = {
 export function loadArduinoWifiState(): ArduinoWifiPairedState {
   try {
     const paired = localStorage.getItem(KEY_PAIRED) === "1";
-    const ssid = localStorage.getItem(KEY_SSID);
+    const rawSsid = localStorage.getItem(KEY_SSID);
+    const ssid = normalizeStoredSsid(rawSsid);
+    if (rawSsid && !ssid) {
+      localStorage.removeItem(KEY_SSID);
+    } else if (rawSsid && ssid && rawSsid !== ssid) {
+      localStorage.setItem(KEY_SSID, ssid);
+    }
     const rawIp = localStorage.getItem(KEY_SENSOR_IP);
     const trimmedRaw = rawIp && rawIp.trim() ? rawIp.trim() : null;
     const sensorIp = normalizeAndValidateArduinoLanIp(trimmedRaw);
@@ -43,7 +61,7 @@ export function loadArduinoWifiState(): ArduinoWifiPairedState {
     }
     return {
       paired,
-      ssid: ssid && ssid.trim() ? ssid.trim() : null,
+      ssid,
       sensorIp,
     };
   } catch {
@@ -53,8 +71,12 @@ export function loadArduinoWifiState(): ArduinoWifiPairedState {
 
 export function saveArduinoWifiPaired(ssid: string): void {
   try {
+    const normalizedSsid = normalizeStoredSsid(ssid);
+    if (!normalizedSsid) {
+      return;
+    }
     localStorage.setItem(KEY_PAIRED, "1");
-    localStorage.setItem(KEY_SSID, ssid.trim());
+    localStorage.setItem(KEY_SSID, normalizedSsid);
   } catch {
     // ignore
   }
@@ -198,15 +220,25 @@ export async function fetchArduinoSensorsFromHttp(
   return data;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isLikelyAbortOrTimeout(e: unknown): boolean {
+  return (
+    e instanceof Error &&
+    (e.name === "AbortError" ||
+      /aborted|timeout/i.test(String(e.message)))
+  );
+}
+
 /**
- * Styr relä/fläkt över Wi‑Fi. Arduino ska på GET svara 200:
- *   FAN_ON  → GET http://<ip>/fan/on
- *   FAN_OFF → GET http://<ip>/fan/off
- * (samma första-rad-format som för /sensor, t.ex. "GET /fan/on HTTP/1.1")
+ * GET till Arduino med samma retry/timeout som fläktkommandon.
+ * Kräver att sketchen svarar 200 på angiven path.
  */
-export async function sendFanCommandOverHttp(
+async function arduinoFanHttpGetWithRetries(
   ip: string,
-  command: "FAN_ON" | "FAN_OFF"
+  path: string
 ): Promise<void> {
   const host = normalizeAndValidateArduinoLanIp(ip);
   if (!host) {
@@ -215,34 +247,91 @@ export async function sendFanCommandOverHttp(
     );
   }
 
-  const path = command === "FAN_ON" ? "/fan/on" : "/fan/off";
   const url = `http://${host}${path}`;
-  const controller = new AbortController();
-  const timeoutMs = 8000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const perAttemptTimeoutMs = 14000;
+  const maxAttempts = 5;
+  const pauseBetweenMs = 600;
 
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) {
-      throw new Error(
-        `Airnest svarade HTTP ${res.status}. Kontrollera att sketchen hanterar GET ${path}.`
-      );
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), perAttemptTimeoutMs);
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Connection: "close",
+        },
+        signal: controller.signal,
+      });
+      await res.text();
+      if (!res.ok) {
+        throw new Error(
+          `Airnest svarade HTTP ${res.status}. Kontrollera att sketchen hanterar GET ${path}.`
+        );
+      }
+      return;
+    } catch (e) {
+      if (!isLikelyAbortOrTimeout(e)) {
+        throw e;
+      }
+      if (attempt === maxAttempts - 1) {
+        throw new Error(
+          "Ingen kontakt med Airnest över Wi‑Fi (timeout). Samma Wi‑Fi som Arduino? " +
+            "Om sketchen bara anropar handleSensorHttpRequest() sällan i loop() (t.ex. före delay(3000)), " +
+            "öka hur ofta den anropas eller flytta delay så att servern hinner svara oftare."
+        );
+      }
+      await sleep(pauseBetweenMs);
+    } finally {
+      clearTimeout(timer);
     }
+  }
+}
+
+const FAN_MODE_PATH: Record<ProgramMode, string> = {
+  quick: "/fan/mode/quick",
+  eco: "/fan/mode/eco",
+  normal: "/fan/mode/normal",
+};
+
+/**
+ * Sätter puls-/torkprofil på Arduino innan GET /fan/on.
+ * Måste matcha skissens GET /fan/mode/quick|eco|normal.
+ */
+export async function sendFanModeOverHttp(
+  ip: string,
+  mode: ProgramMode
+): Promise<void> {
+  const path = FAN_MODE_PATH[mode];
+  try {
+    await arduinoFanHttpGetWithRetries(ip, path);
   } catch (e) {
-    clearTimeout(timer);
-    const aborted =
-      e instanceof Error &&
-      (e.name === "AbortError" ||
-        /aborted|timeout/i.test(String(e.message)));
-    if (aborted) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/HTTP 404/.test(msg)) {
       throw new Error(
-        "Ingen kontakt med Airnest över Wi‑Fi (timeout). Samma nätverk som Arduino?"
+        `${msg}\n\nAirnest verkar köra en äldre sketch utan ${path}. ` +
+          "Ladda upp senaste `IPP/arduino/airnest/airnest.ino` (hanterar /fan/mode/quick, /eco, /normal) och prova igen."
       );
     }
     throw e;
   }
+}
+
+/**
+ * Styr relä/fläkt över Wi‑Fi. Arduino ska på GET svara 200:
+ *   FAN_ON  → GET http://<ip>/fan/on
+ *   FAN_OFF → GET http://<ip>/fan/off
+ * (samma första-rad-format som för /sensor, t.ex. "GET /fan/on HTTP/1.1")
+ *
+ * Flera försök: när BLE inte är aktiv anropar många skisser bara
+ * handleSensorHttpRequest() ungefär var tredje sekund i loop(); ett enstaka
+ * fetch kan då missa svarfönstret trots att /sensor fungerar vid nästa poll.
+ */
+export async function sendFanCommandOverHttp(
+  ip: string,
+  command: "FAN_ON" | "FAN_OFF"
+): Promise<void> {
+  const path = command === "FAN_ON" ? "/fan/on" : "/fan/off";
+  await arduinoFanHttpGetWithRetries(ip, path);
 }

@@ -7,15 +7,24 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
  
+function normalizeEmail(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
 export default function Auth() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
 
   async function signInWithEmail() {
+        const normalizedEmail = normalizeEmail(email)
+        if (!normalizedEmail) {
+          Alert.alert("Saknar e-post", "Skriv in en giltig e-postadress.")
+          return
+        }
         setLoading(true)
-        const { error } = await supabase.auth.signInWithPassword({
-          email: email,
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
           password: password,
         })
 
@@ -23,23 +32,39 @@ export default function Auth() {
           Alert.alert(error.message)
           setLoading(false)
         } else {
-          router.replace("../(tabs)/mainmenu")
+          const deletionRequested =
+            data.user?.user_metadata?.deletion_requested === true
+          if (deletionRequested) {
+            await supabase.auth.signOut()
+            Alert.alert(
+              "Kontot är markerat för radering",
+              "Det här kontot är markerat för radering och kan inte användas för inloggning."
+            )
+            setLoading(false)
+            return
+          }
+          router.replace("/(tabs)")
         }
       }
       async function signUpWithEmail() {
+        const normalizedEmail = normalizeEmail(email)
+        if (!normalizedEmail) {
+          Alert.alert("Saknar e-post", "Skriv in en giltig e-postadress.")
+          return
+        }
         setLoading(true)
         const {
           data: { session },
           error,
         } = await supabase.auth.signUp({
-          email: email,
+          email: normalizedEmail,
           password: password,
         })
         if (error){
           Alert.alert(error.message)
           setLoading(false)
         } else {
-          router.replace("/(tabs)/mainmenu")
+          router.replace("/(tabs)")
         }
       }
 

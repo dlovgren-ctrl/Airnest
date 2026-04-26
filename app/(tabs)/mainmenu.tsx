@@ -21,6 +21,7 @@ import { ProgramStatusCard } from "../../components/ProgramStatusCard";
 import {
   loadArduinoWifiState,
   sendFanCommandOverHttp,
+  sendFanModeOverHttp,
 } from "../../lib/arduinoWifiStatus";
 
 
@@ -108,6 +109,7 @@ export default function MainMenu() {
 
     try {
       const { sensorIp } = loadArduinoWifiState();
+      await sendFanModeOverHttp(sensorIp ?? "", selectedMode);
       await sendFanCommandOverHttp(sensorIp ?? "", "FAN_ON");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
