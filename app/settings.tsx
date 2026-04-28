@@ -21,8 +21,10 @@ import {
   saveArduinoSensorIp,
   saveArduinoWifiPaired,
 } from "../lib/arduinoWifiStatus";
+import { getCurrentUserId } from "../lib/programState";
 
 export default function SettingsScreen() {
+  const [userId, setUserId] = useState<string | null>(null);
   const [ssid, setSsid] = useState("");
   const [password, setPassword] = useState("");
   const [sensorIp, setSensorIp] = useState("");
@@ -33,8 +35,8 @@ export default function SettingsScreen() {
   const [paired, setPaired] = useState(false);
   const [pairedSsid, setPairedSsid] = useState<string | null>(null);
 
-  const hydrate = useCallback(() => {
-    const s = loadArduinoWifiState();
+  const hydrate = useCallback((id: string | null) => {
+    const s = loadArduinoWifiState(id);
     setPaired(s.paired);
     setPairedSsid(s.ssid);
     setSensorIp(s.sensorIp ?? "");
@@ -42,7 +44,12 @@ export default function SettingsScreen() {
   }, []);
 
   useEffect(() => {
-    hydrate();
+    async function init() {
+      const id = await getCurrentUserId();
+      setUserId(id);
+      hydrate(id);
+    }
+    void init();
   }, [hydrate]);
 
   const canSend = useMemo(
@@ -54,6 +61,10 @@ export default function SettingsScreen() {
   );
 
   async function handlePairArduinoToWifi() {
+    if (!userId) {
+      Alert.alert("Ingen användare", "Logga in igen och försök på nytt.");
+      return;
+    }
     const trimmedSsid = ssid.trim();
     if (!trimmedSsid || !password) {
       Alert.alert("Saknad information", "Fyll i nätverksnamn och lösenord.");
@@ -71,11 +82,11 @@ export default function SettingsScreen() {
         delayMs: 2000,
       });
 
-      saveArduinoWifiPaired(trimmedSsid);
+      saveArduinoWifiPaired(trimmedSsid, userId);
       setPaired(true);
       setPairedSsid(trimmedSsid);
       if (ip) {
-        saveArduinoSensorIp(ip);
+        saveArduinoSensorIp(ip, userId);
         setSensorIp(ip);
         Alert.alert(
           "Parkoppling klar",
@@ -103,6 +114,10 @@ export default function SettingsScreen() {
   }
 
   async function handleRefreshIpFromBle() {
+    if (!userId) {
+      Alert.alert("Ingen användare", "Logga in igen och försök på nytt.");
+      return;
+    }
     try {
       setIsRefreshingIp(true);
       const ip = await waitForArduinoIpViaBle({
@@ -110,7 +125,7 @@ export default function SettingsScreen() {
         delayMs: 2000,
       });
       if (ip) {
-        saveArduinoSensorIp(ip);
+        saveArduinoSensorIp(ip, userId);
         setSensorIp(ip);
         Alert.alert("IP uppdaterad", ip);
       } else {
@@ -125,11 +140,19 @@ export default function SettingsScreen() {
   }
 
   function handleSaveSensorIp() {
-    saveArduinoSensorIp(sensorIp);
+    if (!userId) {
+      Alert.alert("Ingen användare", "Logga in igen och försök på nytt.");
+      return;
+    }
+    saveArduinoSensorIp(sensorIp, userId);
     Alert.alert("Sparat", "IP-adressen används för sensordata under Diagnostics.");
   }
 
   function handleChangeNetwork() {
+    if (!userId) {
+      Alert.alert("Ingen användare", "Logga in igen och försök på nytt.");
+      return;
+    }
     Alert.alert(
       "Byt nätverk?",
       "Du kan parkoppla Airnest mot ett nytt Wi‑Fi. Nuvarande sparad status rensas.",
@@ -139,13 +162,13 @@ export default function SettingsScreen() {
           text: "Fortsätt",
           style: "destructive",
           onPress: () => {
-            clearArduinoWifiPairing();
+            clearArduinoWifiPairing(userId);
             setPaired(false);
             setPairedSsid(null);
             setSsid("");
             setPassword("");
             setSensorIp("");
-            hydrate();
+            hydrate(userId);
           },
         },
       ]
@@ -173,7 +196,7 @@ export default function SettingsScreen() {
           <TouchableOpacity onPress={() => router.back()} className="mr-3">
             <Ionicons name="chevron-back" size={24} color="black" />
           </TouchableOpacity>
-          <Text className="text-2xl font-semibold">Inställningar</Text>
+          <Text className="text-2xl font-semibold">Nätverksinställningar</Text>
         </View>
 
         {paired ? (

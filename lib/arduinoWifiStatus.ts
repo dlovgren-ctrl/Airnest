@@ -3,6 +3,15 @@ import type { ProgramMode } from "./programState";
 const KEY_PAIRED = "arduinoWifiPaired";
 const KEY_SSID = "arduinoWifiSsid";
 const KEY_SENSOR_IP = "arduinoSensorIp";
+const USER_WIFI_PREFIX = "arduinoWifiUser:";
+
+function scopedWifiKey(
+  userId: string | null | undefined,
+  suffix: string
+): string | null {
+  if (!userId) return null;
+  return `${USER_WIFI_PREFIX}${userId}:${suffix}`;
+}
 
 function normalizeStoredSsid(raw: string | null): string | null {
   if (!raw) return null;
@@ -43,21 +52,29 @@ export type ArduinoWifiPairedState = {
   sensorIp: string | null;
 };
 
-export function loadArduinoWifiState(): ArduinoWifiPairedState {
+export function loadArduinoWifiState(
+  userId?: string | null
+): ArduinoWifiPairedState {
+  const pairedKey = scopedWifiKey(userId, KEY_PAIRED);
+  const ssidKey = scopedWifiKey(userId, KEY_SSID);
+  const ipKey = scopedWifiKey(userId, KEY_SENSOR_IP);
+  if (!pairedKey || !ssidKey || !ipKey) {
+    return { paired: false, ssid: null, sensorIp: null };
+  }
   try {
-    const paired = localStorage.getItem(KEY_PAIRED) === "1";
-    const rawSsid = localStorage.getItem(KEY_SSID);
+    const paired = localStorage.getItem(pairedKey) === "1";
+    const rawSsid = localStorage.getItem(ssidKey);
     const ssid = normalizeStoredSsid(rawSsid);
     if (rawSsid && !ssid) {
-      localStorage.removeItem(KEY_SSID);
+      localStorage.removeItem(ssidKey);
     } else if (rawSsid && ssid && rawSsid !== ssid) {
-      localStorage.setItem(KEY_SSID, ssid);
+      localStorage.setItem(ssidKey, ssid);
     }
-    const rawIp = localStorage.getItem(KEY_SENSOR_IP);
+    const rawIp = localStorage.getItem(ipKey);
     const trimmedRaw = rawIp && rawIp.trim() ? rawIp.trim() : null;
     const sensorIp = normalizeAndValidateArduinoLanIp(trimmedRaw);
     if (trimmedRaw && !sensorIp) {
-      localStorage.removeItem(KEY_SENSOR_IP);
+      localStorage.removeItem(ipKey);
     }
     return {
       paired,
@@ -69,39 +86,54 @@ export function loadArduinoWifiState(): ArduinoWifiPairedState {
   }
 }
 
-export function saveArduinoWifiPaired(ssid: string): void {
+export function saveArduinoWifiPaired(
+  ssid: string,
+  userId?: string | null
+): void {
+  const pairedKey = scopedWifiKey(userId, KEY_PAIRED);
+  const ssidKey = scopedWifiKey(userId, KEY_SSID);
+  if (!pairedKey || !ssidKey) return;
   try {
     const normalizedSsid = normalizeStoredSsid(ssid);
     if (!normalizedSsid) {
       return;
     }
-    localStorage.setItem(KEY_PAIRED, "1");
-    localStorage.setItem(KEY_SSID, normalizedSsid);
+    localStorage.setItem(pairedKey, "1");
+    localStorage.setItem(ssidKey, normalizedSsid);
   } catch {
     // ignore
   }
 }
 
-export function saveArduinoSensorIp(ip: string): void {
+export function saveArduinoSensorIp(
+  ip: string,
+  userId?: string | null
+): void {
+  const ipKey = scopedWifiKey(userId, KEY_SENSOR_IP);
+  if (!ipKey) return;
   try {
     const normalized = normalizeAndValidateArduinoLanIp(
       ip.replace(/^https?:\/\//i, "").replace(/\/$/, "")
     );
     if (!normalized) {
-      localStorage.removeItem(KEY_SENSOR_IP);
+      localStorage.removeItem(ipKey);
     } else {
-      localStorage.setItem(KEY_SENSOR_IP, normalized);
+      localStorage.setItem(ipKey, normalized);
     }
   } catch {
     // ignore
   }
 }
 
-export function clearArduinoWifiPairing(): void {
+export function clearArduinoWifiPairing(userId?: string | null): void {
+  const pairedKey = scopedWifiKey(userId, KEY_PAIRED);
+  const ssidKey = scopedWifiKey(userId, KEY_SSID);
+  const ipKey = scopedWifiKey(userId, KEY_SENSOR_IP);
+  if (!pairedKey || !ssidKey || !ipKey) return;
   try {
-    localStorage.removeItem(KEY_PAIRED);
-    localStorage.removeItem(KEY_SSID);
-    localStorage.removeItem(KEY_SENSOR_IP);
+    localStorage.removeItem(pairedKey);
+    localStorage.removeItem(ssidKey);
+    localStorage.removeItem(ipKey);
   } catch {
     // ignore
   }
@@ -232,9 +264,41 @@ function isLikelyAbortOrTimeout(e: unknown): boolean {
   );
 }
 
+/** Skissens fläkt-GET returnerar JSON med `ok: true` (t.ex. `{"ok":true}`). */
+function fanHttpPathExpectsOkJson(path: string): boolean {
+  return path.toLowerCase().startsWith("/fan/");
+}
+
+function parseFanCommandAck(text: string): { ok: true } | { ok: false; detail: string } {
+  const trimmed = text.trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  const slice =
+    start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
+
+  let j: Record<string, unknown>;
+  try {
+    j = JSON.parse(slice) as Record<string, unknown>;
+  } catch {
+    return {
+      ok: false,
+      detail: `ogiltigt JSON (utdrag: «${trimmed.replace(/\s+/g, " ").slice(0, 120)}»)`,
+    };
+  }
+
+  if (j.ok === true) return { ok: true };
+  if (j.ok === false) {
+    const err = j.error != null ? String(j.error) : "ok:false";
+    return { ok: false, detail: err };
+  }
+  return { ok: false, detail: "saknar fältet ok:true i svarskroppen" };
+}
+
 /**
  * GET till Arduino med samma retry/timeout som fläktkommandon.
  * Kräver att sketchen svarar 200 på angiven path.
+ * För `/fan/...` krävs dessutom JSON med `ok: true` — det bekräftar att sketchen
+ * tog emot kommandot, inte att lasten (fläkten) faktiskt får ström.
  */
 async function arduinoFanHttpGetWithRetries(
   ip: string,
@@ -243,7 +307,7 @@ async function arduinoFanHttpGetWithRetries(
   const host = normalizeAndValidateArduinoLanIp(ip);
   if (!host) {
     throw new Error(
-      "Ingen giltig IP för Airnest. Parkoppla igen eller ange IP under Inställningar."
+      "Ingen giltig IP för Airnest. Parkoppla igen eller ange IP under Nätverksinställningar."
     );
   }
 
@@ -264,11 +328,20 @@ async function arduinoFanHttpGetWithRetries(
         },
         signal: controller.signal,
       });
-      await res.text();
+      const text = await res.text();
       if (!res.ok) {
         throw new Error(
           `Airnest svarade HTTP ${res.status}. Kontrollera att sketchen hanterar GET ${path}.`
         );
+      }
+      if (fanHttpPathExpectsOkJson(path)) {
+        const ack = parseFanCommandAck(text);
+        if (!ack.ok) {
+          throw new Error(
+            `Airnest svarade HTTP 200 men bekräftade inte fläktkommandot (${ack.detail}). ` +
+              "Kontrollera att senaste `airnest.ino` är uppladdad."
+          );
+        }
       }
       return;
     } catch (e) {
@@ -319,10 +392,13 @@ export async function sendFanModeOverHttp(
 }
 
 /**
- * Styr relä/fläkt över Wi‑Fi. Arduino ska på GET svara 200:
+ * Styr relä/fläkt över Wi‑Fi. Arduino ska på GET svara 200 med JSON `{"ok":true}`:
  *   FAN_ON  → GET http://<ip>/fan/on
  *   FAN_OFF → GET http://<ip>/fan/off
  * (samma första-rad-format som för /sensor, t.ex. "GET /fan/on HTTP/1.1")
+ *
+ * Det bekräftar bara att sketchen körde kommandot — inte att fläkten får ström
+ * (relä/last kan vara frånkopplad utan att Arduino märker det).
  *
  * Flera försök: när BLE inte är aktiv anropar många skisser bara
  * handleSensorHttpRequest() ungefär var tredje sekund i loop(); ett enstaka

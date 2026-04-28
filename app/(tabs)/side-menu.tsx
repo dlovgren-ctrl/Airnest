@@ -81,7 +81,7 @@ export default function SideMenu() {
           onPress={handleOpenSettings}
         >
           <Ionicons name="settings-outline" size={22} />
-          <Text className="ml-4 text-base">Inställningar</Text>
+          <Text className="ml-4 text-base">Nätverksinställningar</Text>
         </TouchableOpacity>
 
         <TouchableOpacity

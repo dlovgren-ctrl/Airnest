@@ -7,8 +7,10 @@ import {
   TouchableOpacity,
   Animated,
   Dimensions,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import {
   ActiveProgram,
   ProgramMode,
@@ -26,11 +28,14 @@ import {
 
 
 export default function MainMenu() {
+  const WIFI_ONBOARDING_SEEN_KEY_PREFIX = "airnestWifiOnboardingSeen:";
   const snapPoints = useMemo(() => ["50%"], []);
   const [selectedMode, setSelectedMode] = useState<ProgramMode | null>(null);
   const [sheetIndex, setSheetIndex] = useState(-1);
   const [userId, setUserId] = useState<string | null>(null);
   const [activeProgram, setActiveProgram] = useState<ActiveProgram | null>(null);
+  const [showFirstLoginHint, setShowFirstLoginHint] = useState(false);
+  const [showNetworkRequiredHint, setShowNetworkRequiredHint] = useState(false);
 
   const screenHeight = Dimensions.get("window").height;
   const sheetHeight = screenHeight * 0.4;
@@ -52,6 +57,11 @@ export default function MainMenu() {
       if (id) {
         const stored = await loadActiveProgram(id);
         setActiveProgram(stored);
+        const onboardingSeenKey = `${WIFI_ONBOARDING_SEEN_KEY_PREFIX}${id}`;
+        const hasSeenWifiHint = localStorage.getItem(onboardingSeenKey) === "1";
+        if (!hasSeenWifiHint) {
+          setShowFirstLoginHint(true);
+        }
       }
     }
 
@@ -95,6 +105,12 @@ export default function MainMenu() {
   const handleStartProgram = async () => {
     if (!selectedMode || !userId) return;
 
+    const { paired, sensorIp } = loadArduinoWifiState(userId);
+    if (!paired || !sensorIp) {
+      setShowNetworkRequiredHint(true);
+      return;
+    }
+
     const durationMs = 2 * 60 * 60 * 1000; // 2h
     const endTime = Date.now() + durationMs;
 
@@ -108,9 +124,8 @@ export default function MainMenu() {
     setSheetIndex(-1);
 
     try {
-      const { sensorIp } = loadArduinoWifiState();
-      await sendFanModeOverHttp(sensorIp ?? "", selectedMode);
-      await sendFanCommandOverHttp(sensorIp ?? "", "FAN_ON");
+      await sendFanModeOverHttp(sensorIp, selectedMode);
+      await sendFanCommandOverHttp(sensorIp, "FAN_ON");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert(
@@ -127,7 +142,7 @@ export default function MainMenu() {
       await clearActiveProgram(userId);
     }
     try {
-      const { sensorIp } = loadArduinoWifiState();
+      const { sensorIp } = loadArduinoWifiState(userId);
       await sendFanCommandOverHttp(sensorIp ?? "", "FAN_OFF");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -136,6 +151,24 @@ export default function MainMenu() {
         `Kunde inte skicka stoppkommando till Airnest över Wi‑Fi.\n\n${msg}`
       );
     }
+  };
+
+  const markWifiOnboardingSeen = () => {
+    if (userId) {
+      localStorage.setItem(`${WIFI_ONBOARDING_SEEN_KEY_PREFIX}${userId}`, "1");
+    }
+    setShowFirstLoginHint(false);
+  };
+
+  const handleFirstLoginHintNavigate = () => {
+    markWifiOnboardingSeen();
+    router.push("/settings");
+  };
+
+  const handleNetworkRequiredHintNavigate = () => {
+    setShowNetworkRequiredHint(false);
+    setSheetIndex(-1);
+    router.push("/settings");
   };
 
   const remainingTime =
@@ -249,6 +282,87 @@ export default function MainMenu() {
           </>
         )}
       </Animated.View>
+
+      <Modal
+        visible={showFirstLoginHint}
+        animationType="fade"
+        transparent
+        onRequestClose={markWifiOnboardingSeen}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.35)",
+            paddingHorizontal: 24,
+            justifyContent: "center",
+          }}
+        >
+          <View className="bg-white rounded-3xl p-6">
+            <Text className="text-xl font-semibold mb-2">Välkommen!</Text>
+            <Text className="text-gray-600 mb-5 leading-6">
+              Innan du startar första programmet: parkoppla Airnest mot Wi‑Fi
+              via Nätverksinställningar, så appen kan skicka kommandon och läsa
+              sensordata.
+            </Text>
+            <TouchableOpacity
+              className="rounded-2xl py-3 items-center mb-3"
+              style={{ backgroundColor: "#DE58AD" }}
+              onPress={handleFirstLoginHintNavigate}
+            >
+              <Text className="text-white font-semibold">
+                Öppna Nätverksinställningar
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              className="rounded-2xl py-3 items-center border border-gray-300"
+              onPress={markWifiOnboardingSeen}
+            >
+              <Text className="text-gray-800 font-medium">Stäng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showNetworkRequiredHint}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowNetworkRequiredHint(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.35)",
+            paddingHorizontal: 24,
+            justifyContent: "center",
+          }}
+        >
+          <View className="bg-white rounded-3xl p-6">
+            <Text className="text-xl font-semibold mb-2">
+              Ej ansluten till något nätverk
+            </Text>
+            <Text className="text-gray-600 mb-5 leading-6">
+              Anslut Airnest till Wi‑Fi innan du startar ett program. Öppna
+              Nätverksinställningar och parkoppla enheten.
+            </Text>
+            <TouchableOpacity
+              className="rounded-2xl py-3 items-center mb-3"
+              style={{ backgroundColor: "#DE58AD" }}
+              onPress={handleNetworkRequiredHintNavigate}
+            >
+              <Text className="text-white font-semibold">
+                Öppna Nätverksinställningar
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              className="rounded-2xl py-3 items-center border border-gray-300"
+              onPress={() => setShowNetworkRequiredHint(false)}
+            >
+              <Text className="text-gray-800 font-medium">Stäng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }

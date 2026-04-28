@@ -63,8 +63,9 @@ export default function Diagnostics() {
     setActiveProgram(program);
   }, []);
 
-  const refreshArduinoWifi = useCallback(() => {
-    const w = loadArduinoWifiState();
+  const refreshArduinoWifi = useCallback(async () => {
+    const id = await getCurrentUserId();
+    const w = loadArduinoWifiState(id);
     setArduinoPaired(w.paired);
     setArduinoSsid(w.ssid);
     setSensorIp(w.sensorIp);
@@ -72,13 +73,13 @@ export default function Diagnostics() {
 
   useEffect(() => {
     refreshProgramState();
-    refreshArduinoWifi();
+    void refreshArduinoWifi();
   }, [refreshProgramState, refreshArduinoWifi]);
 
   useFocusEffect(
     useCallback(() => {
       refreshProgramState();
-      refreshArduinoWifi();
+      void refreshArduinoWifi();
       return undefined;
     }, [refreshProgramState, refreshArduinoWifi])
   );
